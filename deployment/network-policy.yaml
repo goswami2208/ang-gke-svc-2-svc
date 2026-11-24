@@ -1,0 +1,19 @@
+# Defense-in-depth: Only allow Pods with label app=app-a to reach app-b on port 8081
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: restrict-app-b-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: app-b
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: app-a
+    ports:
+    - protocol: TCP
+      port: 8081

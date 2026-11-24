@@ -1,0 +1,80 @@
+# 1. Reserve Global External IPv4 address
+gcloud compute addresses create app-lb-ip --global
+export LB_IP=$(gcloud compute addresses describe app-lb-ip --global --format="value(address)")
+echo "Point your DNS A record for ${DOMAIN} to: ${LB_IP}"
+
+# 2. Allow Google Health Check & Load Balancer proxy IP ranges to reach Pod port 8080
+gcloud compute firewall-rules create allow-gke-neg-lb \
+  --allow=tcp:8080 \
+  --source-ranges=130.211.0.0/22,35.191.0.0/16 \
+  --description="Allow GCP Global LB and health checks to reach app-a pods"
+
+# 3. Create HTTP Health Check matching Spring Boot Actuator readiness probe
+gcloud compute health-checks create http app-a-hc \
+  --port=8080 \
+  --request-path=//actuator/health/readiness
+
+# 4. Create Backend Service for app-a and attach the Standalone NEG
+gcloud compute backend-services create app-a-backend \
+  --load-balancing-scheme=EXTERNAL_MANAGED \
+  --protocol=HTTP \
+  --health-checks=app-a-hc \
+  --global
+
+gcloud compute backend-services add-backend app-a-backend \
+  --network-endpoint-group=app-a-neg \
+  --network-endpoint-group-zone=$ZONE \
+  --balancing-mode=RATE \
+  --max-rate-per-endpoint=100 \
+  --global
+
+# 5. Create Backend Bucket for Angular static files (with Cloud CDN enabled)
+gcloud compute backend-buckets create angular-backend-bucket \
+  --gcs-bucket-name=$BUCKET_NAME \
+  --enable-cdn
+
+# 6. Create URL Map: default to Angular bucket, route /api/* to app-a backend
+gcloud compute url-maps create app-url-map \
+  --default-backend-bucket=angular-backend-bucket
+
+gcloud compute url-maps add-path-matcher app-url-map \
+  --default-backend-bucket=angular-backend-bucket \
+  --path-matcher-name=api-matcher \
+  --path-rules="/api/*=app-a-backend"
+
+# 7. Create Google-managed SSL Certificate & HTTPS Target Proxy
+gcloud compute ssl-certificates create app-ssl-cert \
+  --domains=$DOMAIN \
+  --global
+
+gcloud compute target-https-proxies create app-https-proxy \
+  --url-map=app-url-map \
+  --ssl-certificates=app-ssl-cert
+
+# 8. Create Global HTTPS Forwarding Rule
+gcloud compute forwarding-rules create app-https-fw-rule \
+  --load-balancing-scheme=EXTERNAL_MANAGED \
+  --network-tier=PREMIUM \
+  --address=app-lb-ip \
+  --target-https-proxy=app-https-proxy \
+  --global \
+  --ports=443
+
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+gcloud compute url-maps import http-to-https-redirect \
+  --source=http-redirect.yaml \
+  --global
+
+gcloud compute target-http-proxies create app-http-proxy \
+  --url-map=http-to-https-redirect
+
+gcloud compute forwarding-rules create app-http-fw-rule \
+  --load-balancing-scheme=EXTERNAL_MANAGED \
+  --network-tier=PREMIUM \
+  --address=app-lb-ip \
+  --target-http-proxy=app-http-proxy \
+  --global \
+  --ports=80

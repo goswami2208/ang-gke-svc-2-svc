@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-b
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: app-b
+  template:
+    metadata:
+      labels:
+        app: app-b
+    spec:
+      containers:
+        - name: app-b
+          image: us-east4-docker.pkg.dev/my-cloudbuild-project-434009/apps-repo/app-b:1.0.0
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5006"
+          ports:
+            - containerPort: 8081
+            - containerPort: 5006
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
